@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作业待办事项分析工具 - 基于DeepSeek AI</title>
+
+    <!-- 外部依赖库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
+
+    <style>
+        :root {
+            --bg: #f5f6fa;
+            --surface: #ffffff;
+            --surface-secondary: #f8f9fc;
+            --text: #1a1d2e;
+            --text-secondary: #5a5f7a;
+            --text-muted: #8b8fa8;
+            --border: #e2e5f0;
+            --border-light: #eef0f7;
+            --primary: #4f6ef7;
+            --primary-hover: #3b54e0;
+            --primary-light: #eef1fd;
+            --success: #22c55e;
+            --success-light: #e6f9ef;
+            --warning: #f59e0b;
+            --warning-light: #fff9ed;
+            --danger: #ef4444;
+            --danger-light: #fef2f2;
+            --info: #6366f1;
+            --info-light: #eef0ff;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+            --shadow: 0 4px 16px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+            --shadow-lg: 0 12px 32px rgba(0,0,0,0.1), 0 2px 6px rgba(0,0,0,0.05);
+            --radius-sm: 8px;
+            --radius: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+            --transition: 0.2s cubic-bezier(0.4,0,0.2,1);
+            --transition-slow: 0.35s cubic-bezier(0.4,0,0.2,1);
+            --font-sans: 'Inter','PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif;
+            --font-mono: 'JetBrains Mono','SF Mono','Consolas','Monaco',monospace;
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* 顶部导航栏 */
+        .navbar {
+            border-bottom: 1px solid var(--border);
+            padding: 0 28px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            background: rgba(255,255,255,0.88);
+            box-shadow: var(--shadow-sm);
+        }
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 1.15rem;
+            color: var(--text);
+            letter-spacing: -0.01em;
+        }
+        .navbar-brand .icon {
+            width: 36px; height: 36px;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(135deg,#4f6ef7 0%,#7c5cfc 100%);
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-size: 1.1rem;
+        }
+        .navbar-actions { display:flex; align-items:center; gap:12px; }
+
+        .api-status {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 0.8rem; color: var(--text-secondary);
+            padding: 6px 12px; border-radius: 20px;
+            background: var(--surface-secondary);
+            border: 1px solid var(--border-light);
+            cursor: default; transition: var(--transition);
+        }
+        .api-status .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #ccc; flex-shrink: 0;
+            transition: background 0.3s;
+        }
+        .api-status .dot.active   { background: var(--success); box-shadow: 0 0 6px rgba(34,197,94,0.4); }
+        .api-status .dot.inactive { background: #d1d5db; }
+        /* 新增：警告状态（密钥可能无效） */
+        .api-status .dot.warn     { background: var(--warning); box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+
+        .btn-icon {
+            width:38px; height:38px; border-radius:50%;
+            border:1px solid var(--border); background:var(--surface);
+            cursor:pointer; display:flex; align-items:center; justify-content:center;
+            font-size:1.1rem; color:var(--text-secondary);
+            transition:var(--transition); position:relative;
+        }
+        .btn-icon:hover { background:var(--surface-secondary); border-color:#cdd2e0; color:var(--text); box-shadow:var(--shadow-sm); }
+        .btn-icon:active { transform:scale(0.94); }
+        .btn-icon.has-key { border-color:var(--success); color:var(--success); background:var(--success-light); }
+
+        /* 主布局 */
+        .main-container {
+            max-width: 1340px; margin: 0 auto;
+            padding: 24px 20px 40px;
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 24px; min-height: calc(100vh - 140px);
+        }
+        @media (max-width:900px) {
+            .main-container { grid-template-columns:1fr; max-width:600px; padding:16px 12px 32px; }
+            .navbar { padding:0 14px; height:52px; }
+            .navbar-brand { font-size:1rem; }
+            .navbar-brand .icon { width:30px; height:30px; font-size:0.95rem; }
+        }
+
+        /* 面板 */
+        .panel {
+            background:var(--surface); border-radius:var(--radius-lg);
+            border:1px solid var(--border); padding:24px;
+            display:flex; flex-direction:column; gap:18px;
+            box-shadow:var(--shadow); transition:var(--transition-slow);
+        }
+        .panel-header {
+            display:flex; align-items:center; gap:10px;
+            font-weight:650; font-size:1rem; color:var(--text); letter-spacing:-0.01em;
+        }
+        .panel-header .panel-icon {
+            width:32px; height:32px; border-radius:var(--radius-sm);
+            display:flex; align-items:center; justify-content:center;
+            font-size:0.9rem; flex-shrink:0;
+        }
+        .panel-icon.input-icon  { background:var(--primary-light); color:var(--primary); }
+        .panel-icon.result-icon { background:var(--success-light);  color:var(--success); }
+
+        /* 文本输入 */
+        .textarea-wrapper { position:relative; }
+        textarea {
+            width:100%; min-height:160px;
+            border:2px dashed var(--border); border-radius:var(--radius);
+            padding:16px; font-family:var(--font-sans); font-size:0.95rem;
+            resize:vertical; background:var(--surface-secondary);
+            transition:var(--transition); color:var(--text); line-height:1.7;
+        }
+        textarea:focus {
+            outline:none; border-color:var(--primary); border-style:solid;
+            background:#fff; box-shadow:0 0 0 4px rgba(79,110,247,0.06);
+        }
+        textarea::placeholder { color:var(--text-muted); font-size:0.9rem; }
+
+        /* 字数统计 */
+        .char-counter {
+            text-align:right; font-size:0.72rem;
+            color:var(--text-muted); margin-top:4px;
+            transition:color 0.2s;
+        }
+        .char-counter.warn { color:var(--warning); }
+
+        /* 图片拖放区 */
+        .drop-zone {
+            border:2px dashed var(--border); border-radius:var(--radius);
+            padding:28px 20px; text-align:center; cursor:pointer;
+            transition:var(--transition); background:var(--surface-secondary);
+            position:relative; min-height:100px;
+            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+        }
+        .drop-zone:hover,.drop-zone.drag-over {
+            border-color:var(--primary); background:var(--primary-light);
+            box-shadow:0 0 0 6px rgba(79,110,247,0.04);
+        }
+        .drop-zone.drag-over { border-style:solid; background:#eef1fd; transform:scale(1.01); }
+        .drop-zone .drop-icon { font-size:2.4rem; opacity:0.6; transition:var(--transition); }
+        .drop-zone:hover .drop-icon { opacity:0.9; transform:translateY(-2px); }
+        .drop-zone .drop-text { font-size:0.85rem; color:var(--text-muted); }
+        .drop-zone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+        /* 图片缩略图列表 */
+        .image-thumbnails { display:flex; flex-wrap:wrap; gap:10px; margin-top:4px; }
+        .thumb-item {
+            position:relative; width:72px; height:72px;
+            border-radius:var(--radius-sm); overflow:hidden;
+            border:2px solid var(--border-light); background:#fff;
+            flex-shrink:0; transition:var(--transition); box-shadow:var(--shadow-sm);
+        }
+        .thumb-item:hover { border-color:var(--primary); box-shadow:var(--shadow); }
+        .thumb-item img { width:100%; height:100%; object-fit:cover; }
+        .thumb-item .remove-btn {
+            position:absolute; top:3px; right:3px;
+            width:20px; height:20px; border-radius:50%;
+            background:rgba(0,0,0,0.65); color:#fff; border:none;
+            cursor:pointer; font-size:0.65rem;
+            display:flex; align-items:center; justify-content:center;
+            opacity:0; transition:var(--transition); line-height:1;
+        }
+        .thumb-item:hover .remove-btn { opacity:1; }
+        .image-count-badge { font-size:0.75rem; color:var(--text-muted); align-self:center; margin-left:4px; }
+
+        /* 按钮 */
+        .btn {
+            display:inline-flex; align-items:center; justify-content:center; gap:7px;
+            padding:10px 20px; border-radius:25px; font-weight:600; font-size:0.9rem;
+            cursor:pointer; border:none; transition:var(--transition);
+            letter-spacing:0.01em; white-space:nowrap; font-family:var(--font-sans);
+        }
+        .btn:active { transform:scale(0.96); }
+        .btn-primary { background:var(--primary); color:#fff; box-shadow:0 4px 14px rgba(79,110,247,0.3); }
+        .btn-primary:hover { background:var(--primary-hover); box-shadow:0 6px 20px rgba(79,110,247,0.4); transform:translateY(-1px); }
+        .btn-primary:disabled { background:#b0b8d0; box-shadow:none; cursor:not-allowed; transform:none; }
+        .btn-outline { background:var(--surface); border:2px solid var(--border); color:var(--text); }
+        .btn-outline:hover { border-color:#c5c9d8; background:var(--surface-secondary); }
+        .btn-success { background:var(--success); color:#fff; box-shadow:0 4px 14px rgba(34,197,94,0.3); }
+        .btn-success:hover { box-shadow:0 6px 20px rgba(34,197,94,0.4); transform:translateY(-1px); }
+        .btn-sm { padding:6px 14px; font-size:0.8rem; border-radius:18px; }
+        .btn-group { display:flex; gap:10px; flex-wrap:wrap; }
+
+        /* 结果区域 */
+        .result-placeholder {
+            text-align:center; padding:40px 20px; color:var(--text-muted);
+            flex:1; display:flex; flex-direction:column;
+            align-items:center; justify-content:center; gap:10px;
+        }
+        .result-placeholder .ph-icon { font-size:3rem; opacity:0.5; }
+        .task-list {
+            display:flex; flex-direction:column; gap:12px;
+            flex:1; overflow-y:auto; max-height:500px; padding-right:4px;
+        }
+        .task-card {
+            background:var(--surface-secondary); border-radius:var(--radius);
+            padding:16px 18px; border:1px solid var(--border-light);
+            transition:var(--transition); position:relative;
+            border-left:4px solid transparent;
+        }
+        .task-card:hover { box-shadow:var(--shadow); border-left-color:var(--primary); }
+        .task-card.priority-high   { border-left-color:var(--danger);  background:var(--danger-light);  }
+        .task-card.priority-medium { border-left-color:var(--warning); background:var(--warning-light); }
+        .task-card.priority-low    { border-left-color:var(--success); background:var(--success-light); }
+        .task-header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+        .task-title { font-weight:650; font-size:0.95rem; color:var(--text); }
+        .priority-badge {
+            font-size:0.7rem; font-weight:700; padding:4px 10px;
+            border-radius:14px; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;
+        }
+        .priority-badge.high   { background:#fde8e8; color:#c53030; }
+        .priority-badge.medium { background:#fef3c7; color:#b45309; }
+        .priority-badge.low    { background:#d1fae5; color:#065f46; }
+        .task-desc  { font-size:0.82rem; color:var(--text-secondary); line-height:1.5; }
+        .task-meta  { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:0.75rem; color:var(--text-muted); }
+        .task-meta span { display:inline-flex; align-items:center; gap:4px; }
+        .summary-box {
+            background:var(--info-light); border-radius:var(--radius);
+            padding:14px 16px; font-size:0.85rem; color:#3730a3;
+            margin-bottom:8px; border:1px solid #e0e7ff; line-height:1.6;
+        }
+
+        /* 加载动画 */
+        .spinner {
+            width:28px; height:28px;
+            border:3px solid var(--border-light); border-top-color:var(--primary);
+            border-radius:50%; animation:spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        .loading-overlay {
+            display:flex; align-items:center; justify-content:center;
+            gap:12px; padding:30px; color:var(--text-secondary); font-weight:500;
+        }
+
+        /* Toast */
+        .toast-container {
+            position:fixed; top:20px; right:20px; z-index:9999;
+            display:flex; flex-direction:column; gap:8px; pointer-events:none;
+        }
+        .toast {
+            pointer-events:auto; padding:12px 18px; border-radius:var(--radius-sm);
+            font-size:0.85rem; font-weight:500; color:#fff;
+            box-shadow:var(--shadow-lg); animation:slideIn 0.35s ease-out;
+            max-width:380px; display:flex; align-items:center; gap:8px;
+        }
+        .toast.success { background:#059669; }
+        .toast.error   { background:#dc2626; }
+        .toast.info    { background:#4f6ef7; }
+        .toast.fade-out { animation:slideOut 0.3s ease-in forwards; }
+        @keyframes slideIn { from { transform:translateX(120%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+        @keyframes slideOut { from { transform:translateX(0); opacity:1; } to { transform:translateX(120%); opacity:0; } }
+
+        /* 模态框 */
+        .modal-overlay {
+            position:fixed; inset:0; background:rgba(0,0,0,0.45);
+            z-index:1000; display:flex; align-items:center; justify-content:center;
+            animation:fadeIn 0.25s ease-out;
+            backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+        }
+        @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+        .modal {
+            background:var(--surface); border-radius:var(--radius-xl);
+            padding:28px; width:440px; max-width:92vw;
+            box-shadow:var(--shadow-lg); animation:popIn 0.3s ease-out;
+        }
+        @keyframes popIn {
+            from { transform:scale(0.92) translateY(20px); opacity:0; }
+            to   { transform:scale(1) translateY(0); opacity:1; }
+        }
+        .modal h3 { font-size:1.1rem; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+        .modal input[type="password"],
+        .modal input[type="text"] {
+            width:100%; padding:11px 14px;
+            border:2px solid var(--border); border-radius:var(--radius-sm);
+            font-size:0.9rem; font-family:var(--font-mono);
+            transition:var(--transition); background:var(--surface-secondary);
+            color:var(--text); letter-spacing:0.03em;
+        }
+        .modal input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 4px rgba(79,110,247,0.06); background:#fff; }
+        .modal .hint { font-size:0.75rem; color:var(--text-muted); margin-top:6px; line-height:1.5; }
+        .modal .security-notice {
+            margin-top:10px; padding:8px 12px;
+            background:#fff9ed; border:1px solid #fde68a;
+            border-radius:var(--radius-sm); font-size:0.75rem; color:#92400e;
+        }
+        .modal .btn-row { display:flex; gap:10px; margin-top:18px; justify-content:flex-end; }
+
+        /* 密钥输入行（含显示/隐藏切换） */
+        .key-input-wrap { position:relative; }
+        .key-input-wrap input { padding-right:44px; }
+        .key-toggle-btn {
+            position:absolute; right:10px; top:50%; transform:translateY(-50%);
+            background:none; border:none; cursor:pointer;
+            color:var(--text-muted); font-size:1rem; padding:4px;
+            transition:color 0.2s;
+        }
+        .key-toggle-btn:hover { color:var(--text); }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar { width:5px; }
+        ::-webkit-scrollbar-track { background:transparent; }
+        ::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:10px; }
+        ::-webkit-scrollbar-thumb:hover { background:#b0b5c0; }
+
+        @media print {
+            body { background:#fff; }
+            .navbar,.toast-container,.btn,.drop-zone,textarea,.modal-overlay { display:none !important; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- 顶部导航栏 -->
+<nav class="navbar">
+    <div class="navbar-brand">
+        <div class="icon">📋</div>
+        <span>作业待办分析</span>
+    </div>
+    <div class="navbar-actions">
+        <span class="api-status" id="apiStatus" title="API密钥状态">
+            <span class="dot inactive" id="apiStatusDot"></span>
+            <span id="apiStatusText">未设置密钥</span>
+        </span>
+        <button class="btn-icon" id="btnOpenSettings" title="设置API密钥">⚙️</button>
+    </div>
+</nav>
+
+<!-- 主布局 -->
+<div class="main-container">
+    <!-- 左侧：输入面板 -->
+    <div class="panel" id="inputPanel">
+        <div class="panel-header">
+            <div class="panel-icon input-icon">📝</div>
+            <span>输入作业内容</span>
+        </div>
+        <div class="textarea-wrapper">
+            <textarea
+                id="homeworkText"
+                maxlength="4000"
+                placeholder="在此粘贴或输入老师布置的作业内容...&#10;&#10;例如：&#10;1. 完成数学课本第58页习题3.1-3.5，下周一交&#10;2. 阅读《红楼梦》前五回，写500字读后感，周三前提交&#10;3. 准备周五的英语演讲PPT，主题自选&#10;&#10;提示：如果有图片形式的作业，请拖放到下方区域，图片会附加到文档中。"
+            ></textarea>
+            <div class="char-counter" id="charCounter">0 / 4000</div>
+        </div>
+
+        <!-- 图片拖放区 -->
+        <div class="drop-zone" id="dropZone">
+            <div class="drop-icon">🖼️</div>
+            <div class="drop-text">拖放作业图片到此处，或点击选择文件</div>
+            <div style="font-size:0.7rem;color:var(--text-muted);">支持 JPG / PNG / WebP，可多选，单张限 10MB</div>
+            <input type="file" id="fileInput" accept="image/*" multiple>
+        </div>
+        <div class="image-thumbnails" id="imageThumbnails"></div>
+
+        <!-- 操作按钮 -->
+        <button class="btn btn-primary" id="btnAnalyze" style="align-self:flex-start;">
+            🔍 分析作业并生成待办事项
+        </button>
+    </div>
+
+    <!-- 右侧：结果面板 -->
+    <div class="panel" id="resultPanel">
+        <div class="panel-header">
+            <div class="panel-icon result-icon">✅</div>
+            <span>分析结果</span>
+            <span style="flex:1;"></span>
+            <div class="btn-group" id="downloadBtns" style="display:none;">
+                <button class="btn btn-outline btn-sm" id="btnDownloadWord" title="下载Word文档">📄 Word</button>
+                <button class="btn btn-success btn-sm" id="btnDownloadPdf"  title="下载PDF文档">📕 PDF</button>
+            </div>
+        </div>
+        <div id="resultContent" class="result-placeholder">
+            <div class="ph-icon">🤖</div>
+            <div>点击左侧「分析作业」按钮，AI将自动拆解任务并分析优先级</div>
+            <div style="font-size:0.75rem;color:var(--text-muted);">支持导出Word和PDF文档</div>
+        </div>
+        <div id="pdfRenderArea" style="position:absolute;left:-9999px;top:0;width:700px;background:#fff;padding:30px;font-family:sans-serif;"></div>
+    </div>
+</div>
+
+<!-- API密钥设置模态框 -->
+<div class="modal-overlay" id="modalOverlay" style="display:none;">
+    <div class="modal">
+        <h3>🔑 设置 DeepSeek API 密钥</h3>
+        <div class="key-input-wrap">
+            <input type="password" id="apiKeyInput" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+            <button class="key-toggle-btn" id="btnToggleKeyVisible" title="显示/隐藏密钥">👁️</button>
+        </div>
+        <div class="hint">
+            📌 获取密钥：前往 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" style="color:var(--primary);">DeepSeek 开放平台</a> 创建 API Key。
+        </div>
+        <div class="security-notice">
+            ⚠️ <strong>安全提示：</strong>密钥将保存在浏览器 <code>sessionStorage</code> 中，<strong>关闭标签页后自动清除</strong>。请勿在公共设备上使用。
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-outline btn-sm" id="btnClearKey">🗑️ 清除密钥</button>
+            <button class="btn btn-outline btn-sm" id="btnCancelSettings">取消</button>
+            <button class="btn btn-primary btn-sm" id="btnSaveKey">💾 保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast容器 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+(function () {
+    // ==================== DOM 引用 ====================
+    const $homeworkText      = document.getElementById('homeworkText');
+    const $charCounter       = document.getElementById('charCounter');
+    const $dropZone          = document.getElementById('dropZone');
+    const $fileInput         = document.getElementById('fileInput');
+    const $imageThumbnails   = document.getElementById('imageThumbnails');
+    const $btnAnalyze        = document.getElementById('btnAnalyze');
+    const $resultContent     = document.getElementById('resultContent');
+    const $downloadBtns      = document.getElementById('downloadBtns');
+    const $btnDownloadWord   = document.getElementById('btnDownloadWord');
+    const $btnDownloadPdf    = document.getElementById('btnDownloadPdf');
+    const $modalOverlay      = document.getElementById('modalOverlay');
+    const $apiKeyInput       = document.getElementById('apiKeyInput');
+    const $btnSaveKey        = document.getElementById('btnSaveKey');
+    const $btnClearKey       = document.getElementById('btnClearKey');
+    const $btnCancelSettings = document.getElementById('btnCancelSettings');
+    const $btnOpenSettings   = document.getElementById('btnOpenSettings');
+    const $btnToggleKeyVis   = document.getElementById('btnToggleKeyVisible');
+    const $apiStatusDot      = document.getElementById('apiStatusDot');
+    const $apiStatusText     = document.getElementById('apiStatusText');
+    const $toastContainer    = document.getElementById('toastContainer');
+
+    // ==================== 常量 ====================
+    const STORAGE_KEY   = 'deepseek_api_key_v3';
+    const MAX_IMAGES    = 20;
+    const MAX_IMG_BYTES = 10 * 1024 * 1024; // 10 MB
+    const MAX_CHARS     = 4000;
+
+    // ==================== 状态 ====================
+    let uploadedImages  = []; // { name, objectUrl, dataUrl, width, height, size }
+    let analysisResult  = null;
+    let isAnalyzing     = false;
+
+    // ==================== 初始化 ====================
+    function init() {
+        loadApiKeyStatus();
+        setupEventListeners();
+    }
+
+    // ==================== API 密钥管理（sessionStorage） ====================
+    function getApiKey() {
+        try { return sessionStorage.getItem(STORAGE_KEY) || ''; }
+        catch (e) { console.warn('无法访问 sessionStorage:', e); return ''; }
+    }
+
+    function saveApiKey(key) {
+        try { sessionStorage.setItem(STORAGE_KEY, key.trim()); return true; }
+        catch (e) {
+            console.warn('无法保存到 sessionStorage:', e);
+            showToast('无法保存密钥，请检查浏览器存储权限', 'error');
+            return false;
+        }
+    }
+
+    function clearApiKey() {
+        try { sessionStorage.removeItem(STORAGE_KEY); return true; }
+        catch (e) { return false; }
+    }
+
+    function loadApiKeyStatus() {
+        const key = getApiKey();
+        if (!key) {
+            $apiStatusDot.className = 'dot inactive';
+            $apiStatusText.textContent = '未设置密钥';
+            $btnOpenSettings.classList.remove('has-key');
+            return;
+        }
+        // 密钥存在但长度偏短 → 警告状态
+        if (key.length <= 8) {
+            $apiStatusDot.className = 'dot warn';
+            $apiStatusText.textContent = '密钥可能无效';
+            $btnOpenSettings.classList.add('has-key');
+        } else {
+            $apiStatusDot.className = 'dot active';
+            $apiStatusText.textContent = '密钥已设置 (' + maskKey(key) + ')';
+            $btnOpenSettings.classList.add('has-key');
+        }
+    }
+
+    function maskKey(key) {
+        if (key.length <= 8) return '****';
+        return key.slice(0, 4) + '****' + key.slice(-4);
+    }
+
+    function openSettingsModal() {
+        // 不回填明文密钥，只清空让用户重新输入
+        $apiKeyInput.value = '';
+        $apiKeyInput.type  = 'password';
+        $btnToggleKeyVis.textContent = '👁️';
+        $modalOverlay.style.display = 'flex';
+        setTimeout(() => $apiKeyInput.focus(), 150);
+    }
+
+    function closeSettingsModal() {
+        $modalOverlay.style.display = 'none';
+        $apiKeyInput.value = '';
+        $apiKeyInput.type  = 'password';
+    }
+
+    function handleSaveKey() {
+        const key = $apiKeyInput.value.trim();
+        if (!key) { showToast('请输入有效的 API 密钥', 'error'); return; }
+        if (!key.startsWith('sk-')) {
+            showToast('密钥格式可能不正确（通常以 sk- 开头），已保存，请留意使用', 'info');
+        }
+        if (saveApiKey(key)) {
+            loadApiKeyStatus();
+            closeSettingsModal();
+            showToast('✅ API 密钥已保存（标签页关闭后自动清除）', 'success');
+        }
+    }
+
+    function handleClearKey() {
+        if (!confirm('确定要清除已保存的 API 密钥吗？')) return;
+        clearApiKey();
+        loadApiKeyStatus();
+        closeSettingsModal();
+        showToast('API 密钥已清除', 'info');
+    }
+
+    // ==================== Toast ====================
+    function showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        $toastContainer.appendChild(toast);
+
+        const remove = () => {
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.parentNode && toast.parentNode.removeChild(toast), 300);
+        };
+        const timer = setTimeout(remove, 3200);
+        toast.addEventListener('click', () => { clearTimeout(timer); remove(); });
+    }
+
+    // ==================== 优先级工具函数（消除重复） ====================
+    function getPriorityStyle(priority) {
+        if (priority === '高') return { cls: 'priority-high',   badge: 'high',   emoji: '🔴', color: '#ef4444', hexColor: 'EF4444' };
+        if (priority === '低') return { cls: 'priority-low',    badge: 'low',    emoji: '🟢', color: '#22c55e', hexColor: '22C55E' };
+        return                        { cls: 'priority-medium', badge: 'medium', emoji: '🟡', color: '#f59e0b', hexColor: 'F59E0B' };
+    }
+
+    // ==================== 图片处理 ====================
+    const VALID_TYPES = ['image/jpeg','image/png','image/webp','image/gif','image/bmp','image/tiff'];
+
+    function addImages(files) {
+        const imageFiles = Array.from(files).filter(f => VALID_TYPES.includes(f.type));
+
+        if (imageFiles.length === 0 && files.length > 0) {
+            showToast('仅支持 JPG、PNG、WebP、GIF 格式的图片', 'error');
+            return;
+        }
+
+        // 预先判断总量，避免循环内重复弹 Toast
+        const available = MAX_IMAGES - uploadedImages.length;
+        if (available <= 0) {
+            showToast(`最多支持 ${MAX_IMAGES} 张图片`, 'info');
+            return;
+        }
+
+        const toProcess = imageFiles.slice(0, available);
+        if (imageFiles.length > available) {
+            showToast(`已达上限，仅添加前 ${available} 张`, 'info');
+        }
+
+        toProcess.forEach(file => {
+            // 文件大小限制
+            if (file.size > MAX_IMG_BYTES) {
+                showToast(`"${file.name}" 超过 10MB 限制，已跳过`, 'error');
+                return;
+            }
+            // 去重（按名称 + 大小）
+            if (uploadedImages.some(img => img.name === file.name && img.size === file.size)) {
+                showToast(`图片 "${file.name}" 已添加`, 'info');
+                return;
+            }
+
+            const objectUrl = URL.createObjectURL(file);
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const dataUrl = e.target.result;
+                const img = new Image();
+                img.onload = function () {
+                    uploadedImages.push({
+                        name: file.name,
+                        objectUrl,       // 用于缩略图显示（高效）
+                        dataUrl,         // 用于 PDF/Word 嵌入
+                        width:  img.width,
+                        height: img.height,
+                        size:   file.size,
+                    });
+                    renderThumbnails();
+                };
+                img.src = dataUrl;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        $fileInput.value = '';
+    }
+
+    function removeImage(index) {
+        if (index < 0 || index >= uploadedImages.length) return;
+        const removed = uploadedImages.splice(index, 1)[0];
+        // 正确释放 Object URL 内存
+        if (removed.objectUrl) URL.revokeObjectURL(removed.objectUrl);
+        renderThumbnails();
+    }
+
+    function renderThumbnails() {
+        $imageThumbnails.innerHTML = '';
+        uploadedImages.forEach((img, index) => {
+            const div = document.createElement('div');
+            div.className = 'thumb-item';
+            div.title = `${img.name} (${formatFileSize(img.size)})`;
+            // 缩略图使用 objectUrl，轻量高效
+            div.innerHTML = `
+                <img src="${img.objectUrl}" alt="${escapeHtml(img.name)}" loading="lazy">
+                <button class="remove-btn" data-index="${index}" title="移除">✕</button>
+            `;
+            $imageThumbnails.appendChild(div);
+        });
+
+        // 事件委托替代逐个绑定
+        $imageThumbnails.addEventListener('click', handleThumbnailClick);
+
+        if (uploadedImages.length > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'image-count-badge';
+            badge.textContent = `共 ${uploadedImages.length} 张图片`;
+            $imageThumbnails.appendChild(badge);
+        }
+    }
+
+    function handleThumbnailClick(e) {
+        const btn = e.target.closest('.remove-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        removeImage(parseInt(btn.getAttribute('data-index'), 10));
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes < 1024)           return bytes + ' B';
+        if (bytes < 1024 * 1024)   return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    // ==================== 拖放事件 ====================
+    function setupDragDropListeners() {
+        ['dragenter','dragover','dragleave','drop'].forEach(ev =>
+            document.body.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); })
+        );
+        $dropZone.addEventListener('dragover',  e => { e.preventDefault(); $dropZone.classList.add('drag-over'); });
+        $dropZone.addEventListener('dragleave', e => { e.preventDefault(); $dropZone.classList.remove('drag-over'); });
+        $dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            $dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files?.length) addImages(e.dataTransfer.files);
+        });
+        $dropZone.addEventListener('click', e => {
+            if (e.target !== $fileInput) $fileInput.click();
+        });
+        $fileInput.addEventListener('change', function () {
+            if (this.files?.length) addImages(this.files);
+        });
+    }
+
+    // ==================== DeepSeek API ====================
+    async function callDeepSeekAPI(apiKey, userText, imageCount) {
+        const endpoint = 'https://api.deepseek.com/chat/completions';
+
+        let promptText = userText;
+        if (imageCount > 0) {
+            promptText += `\n\n（注：用户还上传了 ${imageCount} 张作业相关图片作为参考附件，这些图片将包含在导出的文档中。）`;
+        }
+
+        const systemPrompt = `你是一个专业的学习助手，擅长分析老师布置的作业并将其拆解为清晰的待办事项。
+请仔细分析用户提供的作业内容，完成以下任务：
+
+1. 将作业拆解为具体的、可执行的待办事项
+2. 为每个待办事项评估优先级（高/中/低），考虑因素包括：
+   - 截止日期的紧迫程度
+   - 任务的复杂度和所需时间
+   - 是否有依赖关系
+   - 任务的重要程度
+3. 如果作业中提到截止日期，请明确指出
+4. 估算每个任务预计需要的时间
+5. 给出一个总体分析摘要
+
+请以严格的JSON格式返回，格式如下：
+{
+  "summary": "总体分析摘要，简要说明作业量和重点",
+  "tasks": [
+    {
+      "title": "任务标题（简洁明确）",
+      "description": "任务详细描述",
+      "priority": "高",
+      "deadline": "截止日期（如未提及则填'未指定'）",
+      "estimated_time": "预计时间（如'1小时'、'30分钟'等）",
+      "reason": "为什么分配这个优先级的简短理由"
+    }
+  ]
+}
+
+注意：
+- priority字段只能是"高"、"中"、"低"三个值
+- 如果作业内容不清晰或信息不足，请在summary中说明
+- 请确保返回的是合法的JSON，不要包含markdown代码块标记
+- 任务按优先级从高到低排列`;
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user',   content: promptText }
+                ],
+                temperature: 0.5,
+                max_tokens: 3000,
+            }),
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            const msg = errData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+            if (response.status === 401) throw new Error('API 密钥无效，请检查并重新设置。' + msg);
+            if (response.status === 429) throw new Error('请求频率过高或配额不足，请稍后重试。' + msg);
+            if (response.status === 402) throw new Error('账户余额不足，请充值。' + msg);
+            throw new Error('API 请求失败：' + msg);
+        }
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) throw new Error('API 返回内容为空，请检查请求是否正确');
+
+        // 移除可能的 markdown 代码块包裹
+        let jsonStr = content.trim();
+        if (jsonStr.startsWith('```')) {
+            const m = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+            jsonStr = m ? m[1].trim() : jsonStr.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+        }
+
+        let parsed;
+        try { parsed = JSON.parse(jsonStr); }
+        catch (e) {
+            console.error('JSON 解析失败，原始内容:', content);
+            throw new Error('AI 返回格式异常，请重试。原始响应已记录到控制台。');
+        }
+
+        if (!Array.isArray(parsed.tasks)) throw new Error('AI 返回数据结构不完整（缺少 tasks 数组），请重试');
+        if (parsed.tasks.length === 0)    throw new Error('未能从作业中提取到待办事项，请确认作业内容是否清晰完整');
+
+        parsed.tasks = parsed.tasks.map(task => ({
+            ...task,
+            priority:       normalizePriority(task.priority),
+            deadline:       task.deadline       || '未指定',
+            estimated_time: task.estimated_time || '未估算',
+            reason:         task.reason         || '未提供理由',
+            description:    task.description    || '',
+        }));
+        parsed.summary = parsed.summary || '已完成分析';
+        return parsed;
+    }
+
+    function normalizePriority(priority) {
+        if (!priority) return '中';
+        const p = String(priority).trim();
+        if (p.includes('高') || p.toLowerCase() === 'high') return '高';
+        if (p.includes('低') || p.toLowerCase() === 'low')  return '低';
+        return '中';
+    }
+
+    // ==================== 分析作业 ====================
+    async function handleAnalyze() {
+        if (isAnalyzing) return;
+
+        const apiKey = getApiKey();
+        if (!apiKey || apiKey.length < 8) {
+            showToast('请先在右上角设置有效的 DeepSeek API 密钥', 'error');
+            openSettingsModal();
+            return;
+        }
+
+        const userText = $homeworkText.value.trim();
+        if (!userText && uploadedImages.length === 0) {
+            showToast('请输入作业内容或上传作业图片', 'error');
+            $homeworkText.focus();
+            return;
+        }
+        if (!userText && uploadedImages.length > 0) {
+            showToast('请同时输入文字描述（图片中的作业内容），以便 AI 分析', 'info');
+            $homeworkText.focus();
+            return;
+        }
+
+        isAnalyzing = true;
+        $btnAnalyze.disabled  = true;
+        $btnAnalyze.innerHTML = '<span class="spinner"></span> AI分析中...';
+        $resultContent.innerHTML = `<div class="loading-overlay"><span class="spinner"></span><span>DeepSeek AI 正在分析作业内容...</span></div>`;
+        $downloadBtns.style.display = 'none';
+        analysisResult = null;
+
+        try {
+            const result = await callDeepSeekAPI(apiKey, userText, uploadedImages.length);
+            analysisResult = result;
+            renderResult(result);
+            $downloadBtns.style.display = 'flex';
+            showToast(`✅ 分析完成！共提取 ${result.tasks.length} 个待办事项`, 'success');
+        } catch (error) {
+            console.error('分析失败:', error);
+            $resultContent.innerHTML = `
+                <div class="result-placeholder">
+                    <div class="ph-icon">⚠️</div>
+                    <div style="color:#ef4444;font-weight:600;">分析失败</div>
+                    <div style="font-size:0.85rem;color:var(--text-secondary);text-align:center;max-width:90%;">${escapeHtml(error.message)}</div>
+                    <button class="btn btn-outline btn-sm" id="btnRetry" style="margin-top:8px;">🔄 重新分析</button>
+                </div>
+            `;
+            // 重试按钮不刷新页面，保留输入内容
+            document.getElementById('btnRetry')?.addEventListener('click', handleAnalyze);
+            $downloadBtns.style.display = 'none';
+            analysisResult = null;
+            showToast('分析失败：' + error.message, 'error');
+        } finally {
+            isAnalyzing = false;
+            $btnAnalyze.disabled  = false;
+            $btnAnalyze.innerHTML = '🔍 分析作业并生成待办事项';
+        }
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // ==================== 渲染结果 ====================
+    function renderResult(result) {
+        const { summary, tasks } = result;
+        let html = '';
+
+        if (summary) {
+            html += `<div class="summary-box">📊 <strong>分析摘要：</strong>${escapeHtml(summary)}</div>`;
+        }
+
+        const counts = { 高: 0, 中: 0, 低: 0 };
+        tasks.forEach(t => counts[t.priority] = (counts[t.priority] || 0) + 1);
+
+        html += `
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;font-size:0.78rem;color:var(--text-muted);">
+                <span>📋 共<strong>${tasks.length}</strong>个任务</span>
+                ${counts['高'] ? `<span style="color:#ef4444;">🔴 高优先级: ${counts['高']}</span>` : ''}
+                ${counts['中'] ? `<span style="color:#f59e0b;">🟡 中优先级: ${counts['中']}</span>` : ''}
+                ${counts['低'] ? `<span style="color:#22c55e;">🟢 低优先级: ${counts['低']}</span>` : ''}
+            </div>
+        `;
+
+        html += '<div class="task-list">';
+        tasks.forEach((task, index) => {
+            const s = getPriorityStyle(task.priority);
+            html += `
+                <div class="task-card ${s.cls}">
+                    <div class="task-header">
+                        <span class="task-title">${index + 1}. ${escapeHtml(task.title)}</span>
+                        <span class="priority-badge ${s.badge}">${s.emoji} ${escapeHtml(task.priority)}优先级</span>
+                    </div>
+                    ${task.description ? `<div class="task-desc">${escapeHtml(task.description)}</div>` : ''}
+                    <div class="task-meta">
+                        <span>📅 截止：${escapeHtml(task.deadline)}</span>
+                        <span>⏱️ 预计：${escapeHtml(task.estimated_time)}</span>
+                        <span>💡 ${escapeHtml(task.reason)}</span>
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        if (uploadedImages.length > 0) {
+            html += `
+                <div style="margin-top:12px;padding:10px 14px;background:#fefce8;border-radius:8px;font-size:0.78rem;color:#92400e;border:1px solid #fde68a;">
+                    📎 已附加 <strong>${uploadedImages.length}</strong> 张图片，导出文档时将包含在文档末尾
+                </div>
+            `;
+        }
+
+        $resultContent.innerHTML = html;
+    }
+
+    // ==================== Word 导出 ====================
+    function dataUriToBuffer(dataUri) {
+        const base64 = dataUri.split(',')[1];
+        const bin = atob(base64);
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        return buf;
+    }
+
+    function getImageType(dataUrl) {
+        if (dataUrl.startsWith('data:image/png'))  return 'image/png';
+        if (dataUrl.startsWith('data:image/webp')) return 'image/webp';
+        if (dataUrl.startsWith('data:image/gif'))  return 'image/gif';
+        return 'image/jpeg';
+    }
+
+    async function downloadWord() {
+        if (!analysisResult) { showToast('请先完成作业分析', 'error'); return; }
+        if (typeof docx === 'undefined') { showToast('Word 生成库未加载，请检查网络后刷新重试', 'error'); return; }
+
+        try {
+            showToast('正在生成 Word 文档，请稍候...', 'info');
+
+            const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+                    ImageRun, AlignmentType, WidthType, PageBreak } = docx;
+            const { summary, tasks } = analysisResult;
+            const now = new Date().toLocaleString('zh-CN');
+            const fontName = 'Microsoft YaHei';
+
+            const children = [];
+
+            children.push(new Paragraph({
+                children: [new TextRun({ text: '作业待办事项分析报告', bold: true, size: 32, color: '4F6EF7', font: fontName })],
+                spacing: { after: 80 }
+            }));
+            children.push(new Paragraph({
+                children: [new TextRun({ text: `生成时间：${now}  |  由 DeepSeek AI 分析生成`, size: 18, color: '888888', font: fontName })],
+                spacing: { after: 300 }
+            }));
+            children.push(new Paragraph({
+                children: [
+                    new TextRun({ text: '分析摘要：', bold: true, size: 22, color: '3730A3', font: fontName }),
+                    new TextRun({ text: summary, size: 22, color: '3730A3', font: fontName })
+                ],
+                spacing: { before: 120, after: 200 },
+                indent: { left: 300 }
+            }));
+
+            const counts = { 高: tasks.filter(t => t.priority === '高').length, 中: tasks.filter(t => t.priority === '中').length, 低: tasks.filter(t => t.priority === '低').length };
+            children.push(new Paragraph({
+                children: [
+                    new TextRun({ text: `待办事项（共 ${tasks.length} 项）`, bold: true, size: 24, font: fontName }),
+                    new TextRun({ text: `  高:${counts['高']} 中:${counts['中']} 低:${counts['低']}`, size: 18, color: '888888', font: fontName })
+                ],
+                spacing: { before: 200, after: 120 }
+            }));
+
+            const headerTexts  = ['#', '任务', '优先级', '截止日期', '预计时间'];
+            const headerWidths = [8, 42, 15, 20, 15];
+            const tableRows = [
+                new TableRow({
+                    tableHeader: true,
+                    children: headerTexts.map((text, i) =>
+                        new TableCell({
+                            children: [new Paragraph({
+                                children: [new TextRun({ text, bold: true, size: 20, color: 'ffffff', font: fontName })],
+                                alignment: AlignmentType.CENTER
+                            })],
+                            shading: { type: 'clear', fill: '4F6EF7', color: 'auto' },
+                            width: { size: headerWidths[i], type: WidthType.PERCENTAGE }
+                        })
+                    )
+                })
+            ];
+
+            tasks.forEach((task, index) => {
+                const bgColor  = index % 2 === 0 ? 'ffffff' : 'F8F9FC';
+                const priColor = getPriorityStyle(task.priority).hexColor;
+
+                const taskCellChildren = [
+                    new Paragraph({
+                        children: [new TextRun({ text: task.title, bold: true, size: 20, font: fontName })],
+                        spacing: { after: task.description ? 40 : 0 }
+                    })
+                ];
+                if (task.description) {
+                    taskCellChildren.push(new Paragraph({
+                        children: [new TextRun({ text: task.description, size: 17, color: '666666', font: fontName })],
+                        spacing: { after: 40 }
+                    }));
+                }
+                if (task.reason && task.reason !== '未提供理由') {
+                    taskCellChildren.push(new Paragraph({
+                        children: [new TextRun({ text: '理由：' + task.reason, size: 16, color: '999999', font: fontName, italics: true })]
+                    }));
+                }
+
+                tableRows.push(new TableRow({
+                    children: [
+                        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(index + 1), size: 20, font: fontName })], alignment: AlignmentType.CENTER })], shading: { type: 'clear', fill: bgColor, color: 'auto' }, width: { size: 8,  type: WidthType.PERCENTAGE } }),
+                        new TableCell({ children: taskCellChildren, shading: { type: 'clear', fill: bgColor, color: 'auto' }, width: { size: 42, type: WidthType.PERCENTAGE } }),
+                        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: task.priority, bold: true, size: 20, color: priColor, font: fontName })], alignment: AlignmentType.CENTER })], shading: { type: 'clear', fill: bgColor, color: 'auto' }, width: { size: 15, type: WidthType.PERCENTAGE } }),
+                        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: task.deadline || '未指定', size: 19, font: fontName })], alignment: AlignmentType.CENTER })], shading: { type: 'clear', fill: bgColor, color: 'auto' }, width: { size: 20, type: WidthType.PERCENTAGE } }),
+                        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: task.estimated_time || '—', size: 19, font: fontName })], alignment: AlignmentType.CENTER })], shading: { type: 'clear', fill: bgColor, color: 'auto' }, width: { size: 15, type: WidthType.PERCENTAGE } }),
+                    ]
+                }));
+            });
+
+            children.push(new Table({ rows: tableRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+
+            for (const img of uploadedImages) {
+                children.push(new Paragraph({ children: [new PageBreak()] }));
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: `附件图片：${img.name}`, bold: true, size: 22, color: '4F6EF7', font: fontName })],
+                    spacing: { after: 120 }
+                }));
+                const maxW = 450;
+                let w = img.width, h = img.height;
+                if (w > maxW) { h = Math.round(h * (maxW / w)); w = maxW; }
+                children.push(new Paragraph({
+                    children: [new ImageRun({ data: dataUriToBuffer(img.dataUrl), transformation: { width: w, height: h }, type: getImageType(img.dataUrl) })],
+                    alignment: AlignmentType.CENTER, spacing: { before: 60, after: 60 }
+                }));
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: `图片：${img.name}（${formatFileSize(img.size)}）`, size: 16, color: '888888', font: fontName })],
+                    alignment: AlignmentType.CENTER
+                }));
+            }
+
+            const doc = new Document({
+                title: '作业待办事项分析报告',
+                description: '由 DeepSeek AI 分析生成的作业待办事项报告',
+                styles: { default: { document: { run: { font: fontName, size: 22 } } } },
+                sections: [{ properties: {}, children }]
+            });
+
+            const blob = await Packer.toBlob(doc);
+            const url  = URL.createObjectURL(blob);
+            const a    = Object.assign(document.createElement('a'), { href: url, download: `作业待办事项_${new Date().toISOString().slice(0,10)}.docx` });
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showToast('✅ Word 文档下载成功！图片已内嵌到文档中。', 'success');
+        } catch (error) {
+            console.error('Word 生成失败:', error);
+            showToast('Word 生成失败：' + error.message + '。请尝试使用 PDF 导出。', 'error');
+        }
+    }
+
+    // ==================== PDF 导出 ====================
+    async function downloadPdf() {
+        if (!analysisResult) { showToast('请先完成作业分析', 'error'); return; }
+
+        try {
+            showToast('正在生成 PDF 文档，请稍候...', 'info');
+
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+            const pageWidth  = 210, pageHeight = 297;
+            const margin     = 12;
+            const contentW   = pageWidth  - margin * 2;
+            const contentH   = pageHeight - margin * 2;
+
+            // 构建渲染用临时 DOM
+            const renderDiv = document.createElement('div');
+            renderDiv.style.cssText = `
+                width:680px; padding:24px;
+                font-family:'PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif;
+                background:#ffffff; color:#1a1d2e; line-height:1.7;
+            `;
+
+            const { summary, tasks } = analysisResult;
+            let html = `
+                <h2 style="color:#4f6ef7;font-size:20px;margin-bottom:4px;border-bottom:3px solid #4f6ef7;padding-bottom:8px;">📋 作业待办事项分析报告</h2>
+                <p style="color:#888;font-size:11px;margin-bottom:14px;">生成时间：${new Date().toLocaleString('zh-CN')} | 由 DeepSeek AI 分析生成</p>
+                <div style="background:#eef0ff;padding:12px 16px;border-radius:6px;margin:12px 0;border-left:4px solid #6366f1;font-size:13px;color:#3730a3;">
+                    <strong>📊 分析摘要：</strong>${escapeHtml(summary)}
+                </div>
+                <p style="font-size:12px;color:#666;">共 <strong>${tasks.length}</strong> 个待办事项 |
+                    高优先级: ${tasks.filter(t => t.priority==='高').length} |
+                    中优先级: ${tasks.filter(t => t.priority==='中').length} |
+                    低优先级: ${tasks.filter(t => t.priority==='低').length}
+                </p>
+                <table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:12px;">
+                <thead>
+                <tr style="background:#4f6ef7;color:#fff;">
+                    <th style="padding:8px 6px;text-align:left;width:5%;">#</th>
+                    <th style="padding:8px 6px;text-align:left;width:24%;">任务</th>
+                    <th style="padding:8px 6px;text-align:left;width:28%;">描述</th>
+                    <th style="padding:8px 6px;text-align:left;width:10%;">优先级</th>
+                    <th style="padding:8px 6px;text-align:left;width:13%;">截止日期</th>
+                    <th style="padding:8px 6px;text-align:left;width:10%;">预计时间</th>
+                    <th style="padding:8px 6px;text-align:left;width:10%;">理由</th>
+                </tr>
+                </thead><tbody>
+            `;
+
+            tasks.forEach((task, i) => {
+                const bg  = i % 2 === 0 ? '#fff' : '#f8f9fc';
+                const col = getPriorityStyle(task.priority).color;
+                html += `
+                    <tr style="background:${bg};">
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;">${i+1}</td>
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;font-weight:600;">${escapeHtml(task.title)}</td>
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;font-size:11px;">${escapeHtml(task.description || '—')}</td>
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;color:${col};font-weight:bold;">${escapeHtml(task.priority)}</td>
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;font-size:11px;">${escapeHtml(task.deadline || '未指定')}</td>
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;font-size:11px;">${escapeHtml(task.estimated_time || '—')}</td>
+                        <td style="padding:7px 6px;border-bottom:1px solid #e2e5f0;font-size:10px;">${escapeHtml(task.reason || '—')}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            if (uploadedImages.length > 0) {
+                html += `<p style="font-size:11px;color:#92400e;background:#fefce8;padding:8px 12px;border-radius:4px;margin-top:12px;border:1px solid #fde68a;">📎 已附加 <strong>${uploadedImages.length}</strong> 张图片，将在后续页面中显示</p>`;
+            }
+
+            renderDiv.innerHTML = html;
+            document.body.appendChild(renderDiv);
+
+            const canvas = await html2canvas(renderDiv, {
+                scale: 2, useCORS: true, allowTaint: true,
+                backgroundColor: '#ffffff', logging: false,
+            });
+            document.body.removeChild(renderDiv);
+
+            // 修正：正确截取 canvas 分页，避免内容重复
+            const totalImgH = (canvas.height * contentW) / canvas.width;
+            const ratio     = canvas.height / totalImgH; // px per mm
+
+            let offsetMm = 0;
+            let pageIdx  = 0;
+            while (offsetMm < totalImgH) {
+                if (pageIdx > 0) pdf.addPage();
+                const sliceMm  = Math.min(contentH, totalImgH - offsetMm);
+                const srcY     = Math.round(offsetMm * ratio);
+                const srcH     = Math.round(sliceMm * ratio);
+
+                // 裁剪到独立 canvas 再添加，确保分页正确
+                const slice = document.createElement('canvas');
+                slice.width  = canvas.width;
+                slice.height = srcH;
+                slice.getContext('2d').drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
+
+                pdf.addImage(slice.toDataURL('image/png'), 'PNG', margin, margin, contentW, sliceMm, undefined, 'FAST');
+                offsetMm += sliceMm;
+                pageIdx++;
+            }
+
+            // 每张上传图片单独一页
+            for (const img of uploadedImages) {
+                pdf.addPage();
+                const aspect = img.width / img.height;
+                let dw = contentW, dh = dw / aspect;
+                if (dh > contentH) { dh = contentH; dw = dh * aspect; }
+                const xOff = margin + (contentW - dw) / 2;
+                const yOff = margin + (contentH - dh) / 2;
+                try {
+                    pdf.addImage(img.dataUrl, img.name.toLowerCase().endsWith('.png') ? 'PNG' : 'JPEG', xOff, yOff, dw, dh, undefined, 'FAST');
+                    pdf.setFontSize(9);
+                    pdf.setTextColor(136, 136, 136);
+                    pdf.text(`附件图片：${img.name}（${formatFileSize(img.size)}）`, margin, pageHeight - 8);
+                } catch (e) {
+                    console.warn('添加图片到 PDF 失败:', img.name, e);
+                    pdf.setFontSize(11); pdf.setTextColor(200, 50, 50);
+                    pdf.text(`[图片加载失败: ${img.name}]`, margin, pageHeight / 2);
+                }
+            }
+
+            pdf.save(`作业待办事项_${new Date().toISOString().slice(0,10)}.pdf`);
+            showToast('✅ PDF 文档下载成功！', 'success');
+        } catch (error) {
+            console.error('PDF 生成失败:', error);
+            showToast('PDF 生成失败：' + error.message + '。请尝试使用 Word 导出。', 'error');
+        }
+    }
+
+    // ==================== 事件绑定 ====================
+    function setupEventListeners() {
+        setupDragDropListeners();
+
+        $btnAnalyze.addEventListener('click', handleAnalyze);
+        $btnDownloadWord.addEventListener('click', downloadWord);
+        $btnDownloadPdf.addEventListener('click', downloadPdf);
+
+        $btnOpenSettings.addEventListener('click', openSettingsModal);
+        $btnSaveKey.addEventListener('click', handleSaveKey);
+        $btnClearKey.addEventListener('click', handleClearKey);
+        $btnCancelSettings.addEventListener('click', closeSettingsModal);
+        $modalOverlay.addEventListener('click', e => { if (e.target === $modalOverlay) closeSettingsModal(); });
+
+        // 显示/隐藏密钥
+        $btnToggleKeyVis.addEventListener('click', () => {
+            const isPass = $apiKeyInput.type === 'password';
+            $apiKeyInput.type = isPass ? 'text' : 'password';
+            $btnToggleKeyVis.textContent = isPass ? '🙈' : '👁️';
+        });
+
+        // 密钥输入框回车保存
+        $apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleSaveKey(); });
+
+        // 字数计数
+        $homeworkText.addEventListener('input', () => {
+            const len = $homeworkText.value.length;
+            $charCounter.textContent = `${len} / ${MAX_CHARS}`;
+            $charCounter.classList.toggle('warn', len > MAX_CHARS * 0.9);
+        });
+
+        // 键盘快捷键
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && $modalOverlay.style.display === 'flex') closeSettingsModal();
+            if (e.ctrlKey && e.key === 'Enter' && !isAnalyzing && document.activeElement === $homeworkText) {
+                e.preventDefault();
+                handleAnalyze();
+            }
+        });
+
+        // 首次使用提示
+        if (!getApiKey()) {
+            setTimeout(() => {
+                if (!getApiKey()) showToast('👋 欢迎使用！请先在右上角设置 DeepSeek API 密钥', 'info');
+            }, 800);
+        }
+    }
+
+    // ==================== 启动 ====================
+    init();
+    console.log('✅ 作业待办事项分析工具已就绪');
+    console.log('💡 Ctrl+Enter 快速触发分析 | 密钥存储于 sessionStorage（关闭标签页自动清除）');
+})();
+</script>
+</body>
+</html>
